@@ -28,7 +28,7 @@ resource "azurerm_federated_identity_credential" "gh_action_federated_credential
   issuer              = "https://token.actions.githubusercontent.com"
   parent_id           = azurerm_user_assigned_identity.gh_action_user_identity.id
 
-  subject = "repo:${var.gh_repo}:ref:refs/heads/main"
+  subject = "repo:${var.gh_repo}:pull_request"
 }
 
 resource "azurerm_role_assignment" "ci_rg_role_binding" {

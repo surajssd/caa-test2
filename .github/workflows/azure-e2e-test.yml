@@ -16,6 +16,9 @@ on:
       caa-image:
         type: string
         description: prebuilt caa image
+  pull_request:
+    branches:
+    - main
 
 jobs:
   generate-podvm-image-version:
@@ -32,7 +35,7 @@ jobs:
         echo "image-version=${unique_version}" >> "$GITHUB_OUTPUT"
 
   build-podvm-image:
-    uses: confidential-containers/cloud-api-adaptor/.github/workflows/azure-podvm-image-build.yml@main
+    uses: ./.github/workflows/azure-podvm-image-build.yml
     needs:
     - generate-podvm-image-version
     if: github.event.inputs.podvm-image-id == ''
