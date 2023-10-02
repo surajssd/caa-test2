@@ -146,6 +146,9 @@ func (tc *testCase) dumpEvents(cfg *rest.Config) {
 	for _, evnt := range evntList.Items {
 		fmt.Printf("%s\t%s\t%s\t%s\t%s\n", evnt.EventTime, evnt.Type, evnt.Reason, evnt.InvolvedObject, evnt.Message)
 	}
+
+	fmt.Println("I will sleep now!")
+	time.Sleep(9999 * time.Hour)
 }
 
 func (tc *testCase) run() {
