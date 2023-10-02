@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	batchv1 "k8s.io/api/batch/v1"
 
@@ -124,6 +125,29 @@ func (tc *testCase) withAuthImageStatus(status string) *testCase {
 	return tc
 }
 
+func (tc *testCase) dumpEvents(cfg *rest.Config) {
+	if !tc.testing.Failed() {
+		return
+	}
+
+	// Dump the test events
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		log.Errorf("creating clientset: %v", err)
+		return
+	}
+
+	evntList, err := clientset.CoreV1().Events("default").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		log.Errorf("listing events: %v", err)
+		return
+	}
+
+	for _, evnt := range evntList.Items {
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\n", evnt.EventTime, evnt.Type, evnt.Reason, evnt.InvolvedObject, evnt.Message)
+	}
+}
+
 func (tc *testCase) run() {
 	testCaseFeature := features.New(fmt.Sprintf("%s test", tc.testName)).
 		WithSetup("Create testworkload", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
@@ -131,6 +155,10 @@ func (tc *testCase) run() {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			defer func() {
+				tc.dumpEvents(client.RESTConfig())
+			}()
 
 			if tc.configMap != nil {
 				if err = client.Resources().Create(ctx, tc.configMap); err != nil {
@@ -205,6 +233,11 @@ func (tc *testCase) run() {
 		}).
 		Assess(tc.assessMessage, func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 			client := cfg.Client()
+
+			defer func() {
+				tc.dumpEvents(client.RESTConfig())
+			}()
+
 			var podlist v1.PodList
 
 			if tc.job != nil {
@@ -302,6 +335,11 @@ func (tc *testCase) run() {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			defer func() {
+				tc.dumpEvents(client.RESTConfig())
+			}()
+
 			if tc.configMap != nil {
 				if err = client.Resources().Delete(ctx, tc.configMap); err != nil {
 					t.Fatal(err)
