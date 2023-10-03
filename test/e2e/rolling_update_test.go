@@ -181,11 +181,8 @@ func doTestCaaDaemonsetRollingUpdate(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			caaDaemonSetName := "cloud-api-adaptor-daemonset"
-			caaNamespace := "confidential-containers-system"
-
 			ds := &appsv1.DaemonSet{}
-			if err = client.Resources().Get(ctx, caaDaemonSetName, caaNamespace, ds); err != nil {
+			if err = client.Resources().Get(ctx, CAA_DAEMONSET, CAA_NAMESPACE, ds); err != nil {
 				t.Fatal(err)
 			}
 			log.Info("Force to update CAA pods by increasing StartupProbe.FailureThreshold")
