@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	batchv1 "k8s.io/api/batch/v1"
 
@@ -35,6 +36,8 @@ import (
 
 const WAIT_POD_RUNNING_TIMEOUT = time.Second * 900
 const WAIT_JOB_RUNNING_TIMEOUT = time.Second * 600
+const CAA_NAMESPACE = "confidential-containers-system"
+const CAA_DAEMONSET = "cloud-api-adaptor-daemonset"
 
 // testCommand is a list of commands to execute inside the pod container,
 // each with a function to test if the command outputs the value the test
@@ -124,6 +127,57 @@ func (tc *testCase) withAuthImageStatus(status string) *testCase {
 	return tc
 }
 
+func (tc *testCase) dumpEvents(cfg *rest.Config) {
+	if !tc.testing.Failed() {
+		return
+	}
+
+	// Dump the test events
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		log.Errorf("creating clientset: %v", err)
+		return
+	}
+
+	namespace := "default"
+	evntList, err := clientset.CoreV1().Events(namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		log.Errorf("listing events: %v", err)
+		return
+	}
+
+	fmt.Printf("Events from the %s namespace:\n", namespace)
+	for _, evnt := range evntList.Items {
+		fmt.Printf("%s\t%s\t%s\t%s/%s\t%s\n", evnt.FirstTimestamp, evnt.Type, evnt.Reason, evnt.InvolvedObject.Kind, evnt.InvolvedObject.Name, evnt.Message)
+	}
+
+	// Also dump the logs from the CAA pod that is spawned by a daemonset.
+	pods, err := clientset.CoreV1().Pods(CAA_NAMESPACE).List(context.Background(), metav1.ListOptions{LabelSelector: "app=cloud-api-adaptor"})
+	if err != nil {
+		log.Errorf("listing CAA pod: %v", err)
+	}
+
+	for _, pod := range pods.Items {
+		logs, err := clientset.CoreV1().Pods(CAA_NAMESPACE).GetLogs(pod.Name, &v1.PodLogOptions{}).Stream(context.Background())
+		if err != nil {
+			log.Errorf("getting CAA pod logs: %v", err)
+		}
+
+		defer logs.Close()
+
+		buf := new(bytes.Buffer)
+		_, err = io.Copy(buf, logs)
+		if err != nil {
+			log.Errorf("copying CAA pod logs: %v", err)
+		}
+
+		fmt.Printf("Logs from the %s pod:\n%s\n", pod.Name, buf.String())
+	}
+
+	fmt.Println("I will sleep now!")
+	time.Sleep(9999 * time.Hour)
+}
+
 func (tc *testCase) run() {
 	testCaseFeature := features.New(fmt.Sprintf("%s test", tc.testName)).
 		WithSetup("Create testworkload", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
@@ -131,6 +185,10 @@ func (tc *testCase) run() {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			defer func() {
+				tc.dumpEvents(client.RESTConfig())
+			}()
 
 			if tc.configMap != nil {
 				if err = client.Resources().Create(ctx, tc.configMap); err != nil {
@@ -165,14 +223,14 @@ func (tc *testCase) run() {
 				if err != nil {
 					t.Fatal(err)
 				}
-				_, err = clientSet.CoreV1().Secrets("confidential-containers-system").Get(ctx, "auth-json-secret", metav1.GetOptions{})
+				_, err = clientSet.CoreV1().Secrets(CAA_NAMESPACE).Get(ctx, "auth-json-secret", metav1.GetOptions{})
 				if err == nil {
 					log.Info("Deleting pre-existing auth-json-secret...")
-					if err = clientSet.CoreV1().Secrets("confidential-containers-system").Delete(ctx, "auth-json-secret", metav1.DeleteOptions{}); err != nil {
+					if err = clientSet.CoreV1().Secrets(CAA_NAMESPACE).Delete(ctx, "auth-json-secret", metav1.DeleteOptions{}); err != nil {
 						t.Fatal(err)
 					}
 					log.Info("Creating empty auth-json-secret...")
-					if err = client.Resources().Create(ctx, &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "auth-json-secret", Namespace: "confidential-containers-system"}, Type: v1.SecretTypeOpaque}); err != nil {
+					if err = client.Resources().Create(ctx, &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "auth-json-secret", Namespace: CAA_NAMESPACE}, Type: v1.SecretTypeOpaque}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -205,6 +263,11 @@ func (tc *testCase) run() {
 		}).
 		Assess(tc.assessMessage, func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 			client := cfg.Client()
+
+			defer func() {
+				tc.dumpEvents(client.RESTConfig())
+			}()
+
 			var podlist v1.PodList
 
 			if tc.job != nil {
@@ -233,7 +296,7 @@ func (tc *testCase) run() {
 			if tc.pod != nil {
 
 				if tc.imagePullTimer {
-					if err := client.Resources("confidential-containers-system").List(ctx, &podlist); err != nil {
+					if err := client.Resources(CAA_NAMESPACE).List(ctx, &podlist); err != nil {
 						t.Fatal(err)
 					}
 					for _, caaPod := range podlist.Items {
@@ -302,6 +365,11 @@ func (tc *testCase) run() {
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			defer func() {
+				tc.dumpEvents(client.RESTConfig())
+			}()
+
 			if tc.configMap != nil {
 				if err = client.Resources().Delete(ctx, tc.configMap); err != nil {
 					t.Fatal(err)
